@@ -1,22 +1,24 @@
 substitutions:
-  device_name: "BlueTherm"
-  sensor_address: "A4:C1:38:EF:8F:C4"
+  device_name: "Shelly Termostat"
+  sensor_address_1: "A4:C1:38:4B:2B:F0"
+  sensor_address_2: "A4:C1:38:2A:38:E6"
+  sensor_address_3: "A4:C1:38:6B:E0:AF"
 
 esphome:
-  name: blue-thermostat-version1
+  name: shelly-thermostat
+  friendly_name: ${device_name}
+  name_add_mac_suffix: true
   platformio_options:
     board_build.f_cpu: 160000000L
 
 esp32:
-  board: esp32dev
+  board: esp32doit-devkit-v1
   framework:
     type: esp-idf
-    version: latest
     sdkconfig_options:
       CONFIG_FREERTOS_UNICORE: y
       CONFIG_ESP32_DEFAULT_CPU_FREQ_160: y
       CONFIG_ESP32_DEFAULT_CPU_FREQ_MHZ: "160"
-      CONFIG_ESP_TASK_WDT_TIMEOUT_S: "20"
       CONFIG_BT_BLE_50_FEATURES_SUPPORTED: n
       CONFIG_BT_BLE_42_FEATURES_SUPPORTED: y
 
@@ -27,7 +29,6 @@ logger:
 api:
 
 ota:
-  password: "541d22ee62e474c7e801886d9c6fd838"
 
 wifi:
   ssid: !secret wifi_ssid
@@ -35,87 +36,168 @@ wifi:
 
   # Enable fallback hotspot (captive portal) in case wifi connection fails
   ap:
-    ssid: "Shelly-Test Fallback Hotspot"
-    password: "OPbNexvpOhCX"
+    ssid: "${device_name} Hotspot"
+    password: !secret hotspot_password
 
-output:
-  - platform: gpio
-    id: "LED_output"
-    inverted: true
-    pin: GPIO0
-
-  - platform: gpio
-    id: "relay_output"
-    pin: GPIO26
-
-switch:
-  - platform: output
-    id: "LED"
-    name: "${device_name} LED"
-    output: "LED_output"
-
-  - platform: output
-    id: "relay"
-    name: "${device_name} Relay"
-    output: "relay_output"
+esp32_improv:
+  authorizer: "button"
+  status_indicator: "LED"
+  authorized_duration: 2min
 
 binary_sensor:
   - platform: gpio
-    name: "${device_name} Switch"
-    pin: GPIO4
-    on_press:
-      then:
-        - climate.control:
-            id: thermos
-            mode: "OFF"
-        - switch.turn_on: "relay"
-    on_release:
-      then:
-        - switch.turn_off: "relay"
-        - climate.control:
-            id: thermos
-            mode: "HEAT"
-    filters:
-      - delayed_on_off: 50ms
-  
-  - platform: gpio
-    name: "${device_name} Button"
     pin:
       number: GPIO25
       inverted: yes
       mode:
         input: true
         pullup: true
-    on_press:
-      then:
-        - climate.control:
-            id: thermos
-            mode: "OFF"
-        - switch.turn_on: "relay"     
-    filters:
-      - delayed_on_off: 5ms
+    id: "button"
+
+output:
+  - platform: gpio
+    pin:
+      number: GPIO0
+      inverted: true
+    id: "LED"
 
 esp32_ble_tracker:
   scan_parameters:
     active: false
 
+switch:
+  - platform: gpio
+    id: "relay"
+    name: "Relay"
+    pin: GPIO26
+  
+  - platform: template
+    name: "Zone 1"
+    id: "input1"
+    optimistic: yes
+    restore_mode: RESTORE_DEFAULT_ON
+  
+  - platform: template
+    name: "Zone 2"
+    id: "input2"
+    optimistic: yes
+    restore_mode: RESTORE_DEFAULT_ON
+
+  - platform: template
+    name: "Zone 3"
+    id: "input3"
+    optimistic: yes
+    restore_mode: RESTORE_DEFAULT_ON
+
 sensor:
   - platform: atc_mithermometer
-    mac_address: "${sensor_address}"
+    mac_address: "${sensor_address_1}"
     temperature:
-      id: "temp"
-      name: "${device_name} Temperature"
+      id: "temp1"
+      name: "Temperature 1"
     humidity:
-      name: "${device_name} Humidity"
+      name: "Humidity 1"
     battery_level:
-      name: "${device_name} Battery"
+      name: "Battery 1"
+
+  - platform: atc_mithermometer
+    mac_address: "${sensor_address_2}"
+    temperature:
+      id: "temp2"
+      name: "Temperature 2"
+    humidity:
+      name: "Humidity 2"
+    battery_level:
+      name: "Battery 2"
+
+  - platform: atc_mithermometer
+    mac_address: "${sensor_address_3}"
+    temperature:
+      id: "temp3"
+      name: "Temperature 3"
+    humidity:
+      name: "Humidity 3"
+    battery_level:
+      name: "Battery 3"
+
+  - platform: ntc
+    sensor: temp_resistance_reading
+    name: " Internal Temperature"
+    unit_of_measurement: "°C"
+    accuracy_decimals: 1
+    icon: "mdi:thermometer"
+    calibration:
+      b_constant: 3350
+      reference_resistance: 10kOhm
+      reference_temperature: 298.15K
+    on_value_range:
+      - above: "80.0"
+        then:
+          - switch.turn_off: "relay"
+
+  - platform: resistance
+    id: temp_resistance_reading
+    sensor: temp_analog_reading
+    configuration: DOWNSTREAM
+    resistor: 10kOhm
+  
+  - platform: adc
+    id: temp_analog_reading
+    pin: GPIO32
+    attenuation: 11db
+
+  - platform: adc
+    name: "Supply Voltage"
+    pin: GPIO33
+    attenuation: 11db
+    filters:
+      - multiply: 8
+  
+  - platform: template
+    id: temp1_vir
+    lambda: |-
+      return (id(temp1).state);
+    update_interval: 10s
+  
+  - platform: template
+    id: temp2_vir
+    lambda: |-
+      return (id(temp2).state);
+    update_interval: 10s
+
+  - platform: template
+    id: temp3_vir
+    lambda: |-
+      return (id(temp3).state);
+    update_interval: 10s
+
+  - platform: template
+    name: "Temperature average"
+    id: temp_avg 
+    lambda: |-
+      float sum=0;
+      float count=0;
+      if (!isnan(id(temp1_vir).state) && (id(input1).state)){
+        sum=sum+id(temp1_vir).state;
+        count++;
+      }
+      if (!isnan(id(temp2_vir).state) && (id(input2).state)){
+        sum=sum+id(temp2_vir).state;
+        count++;
+      }
+      if (!isnan(id(temp3_vir).state) && (id(input3).state)){
+        sum=sum+id(temp3_vir).state;
+        count++;
+      }
+      return (sum/count);
+    update_interval: 10s
 
 climate:
   - platform: thermostat
     id: thermos
-    name: "${device_name} Thermostat"
+    name: "Thermostat"
     default_preset: Home
-    sensor: temp
+    sensor: temp_avg
     heat_deadband: 0.3
     heat_overrun: 0.3
     min_heating_off_time: 1s
@@ -127,6 +209,8 @@ climate:
      - switch.turn_off: relay
     preset:
       - name: Home
-        default_target_temperature_low: 21 
+        default_target_temperature_low: 22 
       - name: Away
-        default_target_temperature_low: 18
+        default_target_temperature_low: 17
+      - name: Sleep
+        default_target_temperature_low: 20
